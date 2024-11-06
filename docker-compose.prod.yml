@@ -1,0 +1,105 @@
+services:
+  checkout:
+    container_name: checkout
+    labels:
+      logging: "promtail"
+      logging_jobname: "checkout"
+    image: ghcr.io/Sendzap-Oficial/sendzap-checkout:checkout-latest
+    env_file:
+      - ./services/checkout/.env
+    ports:
+      - 3332:3332
+      - 2112:2112
+    volumes:
+      - ./:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    container_name: postgres
+    labels:
+      logging: "promtail"
+      logging_jobname: "postgres"
+    image: postgres:latest
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=postgres
+      - TZ=America/Sao_Paulo
+    ports:
+      - 54322:5432
+    volumes:
+      - ./.docker/postgres:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  prometheus:
+    container_name: prometheus
+    image: prom/prometheus
+    volumes:
+      - "./.docker/obs/prod/prometheus.yml:/etc/prometheus/prometheus.yml"
+      - "./.docker/obs/prod/rules.yml:/etc/prometheus/rules.yml"
+    ports:
+      - 9090:9090
+
+  redis-cache:
+    container_name: redis-cache
+    labels:
+      logging: "promtail"
+      logging_jobname: "redis-cache"
+    image: redis:latest
+    ports:
+      - 6379:6379
+    environment:
+      - REDIS_PASSWORD=yourpassword
+    command: ["redis-server", "--requirepass", "redis-cache"]
+
+  loki:
+    container_name: loki
+    image: grafana/loki:latest
+    ports:
+      - 3100:3100
+    command: -config.file=/etc/loki/local-config.yaml
+
+  alertmanager:
+    container_name: alertmanager
+    image: prom/alertmanager
+    volumes:
+      - ./.docker/obs/prod/alertmanager.yml:/etc/alertmanager/alertmanager.yml
+    ports:
+      - 9093:9093
+
+  grafana:
+    container_name: grafana
+    image: grafana/grafana:latest
+    ports:
+      - 3000:3000
+    volumes:
+      - ./.docker/obs/prod/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yaml
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
+      - TZ=America/Sao_Paulo
+
+  promtail:
+    image: grafana/promtail:latest
+    container_name: promtail
+    volumes:
+      - ./.docker/obs/prod/promtail.yaml:/etc/promtail/docker-config.yaml
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: -config.file=/etc/promtail/docker-config.yaml
+    depends_on:
+      - loki
+
+  jaeger:
+    container_name: jaeger
+    image: jaegertracing/all-in-one
+    ports:
+      - 16686:16686
+
